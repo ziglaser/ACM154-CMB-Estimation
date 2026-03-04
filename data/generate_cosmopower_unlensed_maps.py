@@ -184,11 +184,6 @@ def generate_cosmopower_map(seed, noise_level = 0.08, h0 = 67.37, omch2 = 0.1198
         plt.savefig("map_with_noise.png")
         plt.show()
 
-        plt.imshow(map/pixel_size)
-        plt.colorbar()
-        plt.title(f"Unlensed CMB Temperature Map Seed {seed} with pixel size correction")
-        plt.show()
-
     return map
 
 
