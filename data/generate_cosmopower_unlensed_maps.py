@@ -193,4 +193,4 @@ def generate_cosmopower_map(seed, noise_level = 0.08, h0 = 67.37, omch2 = 0.1198
 
 
 #example function call to generate a map, save it, and plot it.
-generate_cosmopower_map(1000, 0.08, 67.37,0.1198, 0.02233, True, True)
+generate_cosmopower_map(0, 0.08, 67.37,0.1198, 0.02233, True, True)
