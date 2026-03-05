@@ -51,12 +51,15 @@ FOURIER_K    = np.sqrt(kx_g ** 2 + ky_g ** 2)          # (64, 33)
 FOURIER_K_FL = FOURIER_K.flatten()                       # (2112,)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Prior ranges (broad enough to cover HMC posterior)
+# Prior ranges — match HMC (hmc_flexible_serial_production_version.py line 268)
+#   h0    ~ N(67.37, 40²)   ombh2 ~ N(0.02233, 0.01²)   omch2 ~ N(0.1198, 0.06²)
+# lo/hi are physical clips applied when sampling training data; they cover
+# ±2σ of the HMC prior while staying within physically meaningful bounds.
 # ─────────────────────────────────────────────────────────────────────────────
 PRIOR = {
-    "h0":    {"mean": 67.37,   "std": 6.0,   "lo": 55.0,   "hi": 80.0},
-    "ombh2": {"mean": 0.02233, "std": 0.003,  "lo": 0.015,  "hi": 0.030},
-    "omch2": {"mean": 0.1198,  "std": 0.015,  "lo": 0.08,   "hi": 0.16},
+    "h0":    {"mean": 67.37,   "std": 40.0,  "lo": 20.0,   "hi": 120.0},
+    "ombh2": {"mean": 0.02233, "std": 0.01,  "lo": 0.005,  "hi": 0.040},
+    "omch2": {"mean": 0.1198,  "std": 0.06,  "lo": 0.02,   "hi": 0.25},
 }
 PARAM_MEAN = np.array([PRIOR["h0"]["mean"], PRIOR["ombh2"]["mean"], PRIOR["omch2"]["mean"]])
 PARAM_STD  = np.array([PRIOR["h0"]["std"],  PRIOR["ombh2"]["std"],  PRIOR["omch2"]["std"]])
@@ -135,11 +138,10 @@ class CosmoPowerSurrogate(nn.Module):
 
 surrogate = CosmoPowerSurrogate()
 optimizer = optim.Adam(surrogate.parameters(), lr=1e-3)
-# Cosine annealing gives a smoother LR decay over 3000 epochs
-scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=3000, eta_min=1e-5)
+EPOCHS = 2000
+scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-5)
 
 print(f"\nTraining surrogate (output dim = {OUTPUT_DIM}) …")
-EPOCHS = 3000
 best_val = float("inf")
 best_state = None
 

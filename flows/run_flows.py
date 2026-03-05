@@ -18,23 +18,26 @@ from normalizing_flows import (
 # ─────────────────────────────────────────────────────────────────────────────
 # Choose dataset: "toy" | "unlensed" | "lensed"
 # ─────────────────────────────────────────────────────────────────────────────
-DATASET = "toy"
+DATASET = "unlensed"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared hyper-parameters
 # ─────────────────────────────────────────────────────────────────────────────
 LR         = 1e-3
-NUM_EPOCHS = 200
+NUM_EPOCHS = 1000
 BATCH_SIZE = 64
-NUM_LAYERS = 6
+NUM_LAYERS = 8
 HIDDEN_DIM = 256
 SHOW_ANIM  = False
 
 # Likelihood temperature annealing.
 # Beta is ramped linearly from BETA_START → BETA_END over NUM_EPOCHS.
-#   BETA_START = 0.0  → pure prior at epoch 0 (flow learns a stable shape first)
-#   BETA_END   = 1.0  → full posterior at the final epoch
-# Lower BETA_END if the surrogate is still inaccurate (e.g. 0.1 until retrained).
+# The log-likelihood is normalised by N_eff (≈2000 Fourier modes) so it is O(1),
+# matching the scale of log_prior.  This means:
+#   beta = 0   → pure prior
+#   beta = 1   → prior and likelihood weighted equally
+#   beta > 1   → likelihood dominates (data-driven, appropriate once surrogate is accurate)
+# Start conservative (0→1) and increase BETA_END once results look stable.
 BETA_START = 0.0
 BETA_END   = 1.0
 
@@ -45,7 +48,7 @@ BETA_END   = 1.0
 
 # Fiducial (true) cosmological parameters used for data generation
 TRUE_VALUES = [67.37, 0.02233, 0.1198]   # h0, ombh2, omch2
-PARAM_NAMES = ["$H_0$", r"$\omega_b$", r"$\omega_c$"]
+PARAM_NAMES = ["$H_0$", r"$\Omega_b h^2$", r"$\Omega_c h^2$"]
 
 PLOT_DIR = "plots"
 os.makedirs(PLOT_DIR, exist_ok=True)
@@ -164,6 +167,7 @@ if DATASET == "toy":
         n_samples=400,
         u1_range=[-2, 3],
         u2_range=[-2, 2],
+        fig_name=os.path.join(PLOT_DIR, "toy_final.png"),
     )
 
 
@@ -187,7 +191,7 @@ elif DATASET == "unlensed":
     ky_grid, kx_grid = np.meshgrid(ky, kx)
     fourier_k  = np.sqrt(kx_grid ** 2 + ky_grid ** 2)        # (64, 33)
 
-    noise_level    = 10 ** -8
+    noise_level    = 0.08   # matches hmc_flexible_serial_production_version.py
     noise_variances = np.ones_like(fourier_k) * noise_level ** 2
 
     # Masks (same as hmc_flexible_serial_production_version.py)
@@ -211,23 +215,32 @@ elif DATASET == "unlensed":
     surrogate, param_mean_t, param_std_t = load_surrogate("cosmopower_surrogate.pt")
 
     # Pre-convert fixed numpy arrays to torch tensors once
-    noise_var_t        = torch.tensor(noise_variances,    dtype=torch.float32)  # (64, 33)
-    fourier_real_t     = torch.tensor(fourier_obs.real,   dtype=torch.float32)  # (64, 33)
-    fourier_imag_t     = torch.tensor(fourier_obs.imag,   dtype=torch.float32)  # (64, 33)
-    self_inverse_mask_t = torch.tensor(self_inverse_mask, dtype=torch.float32)  # (64, 33)
-    upper_mask_t        = torch.tensor(upper_mask,        dtype=torch.float32)  # (64, 33)
-    zero_mode_mask_t    = torch.tensor(zero_mode_mask,    dtype=torch.float32)  # (64, 33)
+    noise_var_t         = torch.tensor(noise_variances,    dtype=torch.float32)  # (64, 33)
+    fourier_real_t      = torch.tensor(fourier_obs.real,   dtype=torch.float32)  # (64, 33)
+    fourier_imag_t      = torch.tensor(fourier_obs.imag,   dtype=torch.float32)  # (64, 33)
+    self_inverse_mask_t = torch.tensor(self_inverse_mask,  dtype=torch.float32)  # (64, 33)
+    upper_mask_t        = torch.tensor(upper_mask,         dtype=torch.float32)  # (64, 33)
+    zero_mode_mask_t    = torch.tensor(zero_mode_mask,     dtype=torch.float32)  # (64, 33)
+
+    # Number of independent scalar terms summed in log_lik.
+    # Self-inverse modes contribute 1 real term each; upper-triangle modes
+    # contribute 2 terms (real + imag).  Dividing by N_eff makes log_lik O(1),
+    # the same scale as log_prior (a 3D Gaussian ≈ -5 to -10), so that beta
+    # annealing actually controls the prior/likelihood balance.
+    # Without this, log_lik ≈ -10,000 and even beta=0.01 overwhelms the prior.
+    _zm = zero_mode_mask_t
+    _si = self_inverse_mask_t
+    _um = upper_mask_t
+    N_EFF_UNLENSED = float((_zm * _si).sum() + 2.0 * (_zm * _um).sum())
 
     def log_likelihood_fn_unlensed(theta):
         """
         theta: [N, 3] normalised parameter tensor (z-scored by param_mean_t / param_std_t).
-        Returns log p(map | theta) of shape [N].
+        Returns normalised log p(map | theta) / N_eff of shape [N].
 
-        Mirrors get_logpdfs_v2 from hmc_flexible_serial_production_version.py,
-        with CosmoPower replaced by the differentiable PyTorch surrogate.
-
-        Working in normalised space keeps the flow reference N(0,I) aligned with
-        the prior N(0,I), avoiding the NaN explosion caused by scale mismatch.
+        Dividing by N_eff (≈2000 independent Fourier terms) brings the
+        log-likelihood to O(1), matching the scale of the 3D log-prior so that
+        beta annealing actually controls the prior/likelihood balance.
         """
         # 1. theta is already normalised → feed directly to surrogate
         log_map_var = surrogate(theta)                              # [N, 64*33]
@@ -236,25 +249,24 @@ elif DATASET == "unlensed":
         # 2. sigmas = sqrt(signal_variance + noise_variance)
         sigmas = torch.sqrt(map_var + noise_var_t.unsqueeze(0))    # [N, 64, 33]
 
-        # 3. Log-pdf of observed Fourier coefficients (get_logpdfs_v2 in PyTorch)
+        # 3. Log-pdf of observed Fourier coefficients
         sqrt2 = 2 ** 0.5
-        # Real-valued self-inverse modes: log N(x_real; 0, sigma)
         self_inv_lp = dist.Normal(0., sigmas).log_prob(
             fourier_real_t.unsqueeze(0))                           # [N, 64, 33]
-        # Complex upper-triangle modes: each split into N(re;0,σ/√2)+N(im;0,σ/√2)
         real_lp = dist.Normal(0., sigmas / sqrt2).log_prob(
             fourier_real_t.unsqueeze(0))
         imag_lp = dist.Normal(0., sigmas / sqrt2).log_prob(
             fourier_imag_t.unsqueeze(0))
 
-        zm = zero_mode_mask_t.unsqueeze(0)    # [1, 64, 33]
+        zm = zero_mode_mask_t.unsqueeze(0)
         si = self_inverse_mask_t.unsqueeze(0)
         um = upper_mask_t.unsqueeze(0)
 
         log_lik = (zm * si * self_inv_lp
                    + zm * um * real_lp
                    + zm * um * imag_lp).sum(dim=(1, 2))            # [N]
-        return log_lik
+
+        return log_lik / N_EFF_UNLENSED
 
     # Prior in NORMALISED space → N(0, I_3).
     # The flow reference is also N(0, I_3), so they are aligned from step 1.
@@ -302,28 +314,83 @@ elif DATASET == "lensed":
     # Use the first map as the "observation" for posterior inference
     observed_map_np = f_tilde[:, :, 0]
 
+    npix           = 64
+    pixel_size_am  = 8.0
+    pixel_size_rad = pixel_size_am * np.pi / (60 * 180)
+
+    # Fourier transform of the observed lensed map (same convention as unlensed)
+    lensed_map_scaled = observed_map_np * pixel_size_rad
+    fourier_obs_l = fft.rfft2(lensed_map_scaled, norm="ortho")
+
+    kx = 2 * np.pi * fft.fftfreq(npix, d=pixel_size_rad)
+    ky = 2 * np.pi * fft.rfftfreq(npix, d=pixel_size_rad)
+    ky_grid, kx_grid = np.meshgrid(ky, kx)
+    fourier_k_l = np.sqrt(kx_grid ** 2 + ky_grid ** 2)       # (64, 33)
+
+    noise_level_l      = 0.08   # matches hmc_flexible_serial_production_version.py
+    noise_variances_l  = np.ones_like(fourier_k_l) * noise_level_l ** 2
+
+    # Mode masks (identical logic to unlensed)
+    self_inverse_indices = [0, npix // 2]
+    self_inverse_mask_l  = np.zeros_like(fourier_k_l)
+    for i in self_inverse_indices:
+        for j in self_inverse_indices:
+            self_inverse_mask_l[i, j] = 1
+
+    upper_mask_l = np.ones((npix, npix // 2 + 1))
+    for i in self_inverse_indices:
+        for j in self_inverse_indices:
+            upper_mask_l[i, j] = 0
+    upper_mask_l[npix // 2 + 1:, 0]  = 0
+    upper_mask_l[npix // 2 + 1:, -1] = 0
+
+    zero_mode_mask_l        = np.ones_like(upper_mask_l)
+    zero_mode_mask_l[0, 0]  = 0
+
+    # Load surrogate (trained on unlensed C_ell — an approximation for lensed)
+    surrogate_l, param_mean_tl, param_std_tl = load_surrogate("cosmopower_surrogate.pt")
+
+    noise_var_tl         = torch.tensor(noise_variances_l,   dtype=torch.float32)
+    fourier_real_tl      = torch.tensor(fourier_obs_l.real,  dtype=torch.float32)
+    fourier_imag_tl      = torch.tensor(fourier_obs_l.imag,  dtype=torch.float32)
+    self_inverse_mask_tl = torch.tensor(self_inverse_mask_l, dtype=torch.float32)
+    upper_mask_tl        = torch.tensor(upper_mask_l,        dtype=torch.float32)
+    zero_mode_mask_tl    = torch.tensor(zero_mode_mask_l,    dtype=torch.float32)
+
+    N_EFF_LENSED = float(
+        (zero_mode_mask_tl * self_inverse_mask_tl).sum()
+        + 2.0 * (zero_mode_mask_tl * upper_mask_tl).sum()
+    )
+
     def log_likelihood_fn_lensed(theta):
         """
-        theta: [N, 3] tensor of (h0, ombh2, omch2).
-        Returns log p(lensed_map | theta) of shape [N].
-
-        The lensed likelihood is more complex than the unlensed one because the
-        lensing operation mixes Fourier modes non-linearly.  Typical approaches:
-          - Simulation-based inference (SBI / neural likelihood estimation)
-          - Marginalising over the unlensed map with HMC (as in map_generation.jl)
-          - A learned summary statistic + Gaussian likelihood approximation
-
-        Placeholder: returns zeros (prior-only training until likelihood is implemented).
+        theta: [N, 3] normalised parameter tensor (z-scored).
+        Returns normalised log p(lensed_map | theta) / N_eff of shape [N].
+        Uses the unlensed surrogate as an approximation; divides by N_eff so
+        the likelihood is O(1) and beta annealing controls prior/likelihood balance.
         """
-        return torch.zeros(theta.shape[0])
+        log_map_var = surrogate_l(theta)
+        map_var     = torch.exp(log_map_var).reshape(-1, 64, 33)
+        sigmas      = torch.sqrt(map_var + noise_var_tl.unsqueeze(0))
+        sqrt2       = 2 ** 0.5
+        self_inv_lp = dist.Normal(0., sigmas).log_prob(fourier_real_tl.unsqueeze(0))
+        real_lp     = dist.Normal(0., sigmas / sqrt2).log_prob(fourier_real_tl.unsqueeze(0))
+        imag_lp     = dist.Normal(0., sigmas / sqrt2).log_prob(fourier_imag_tl.unsqueeze(0))
+        zm = zero_mode_mask_tl.unsqueeze(0)
+        si = self_inverse_mask_tl.unsqueeze(0)
+        um = upper_mask_tl.unsqueeze(0)
+        log_lik = (zm * si * self_inv_lp
+                   + zm * um * real_lp
+                   + zm * um * imag_lp).sum(dim=(1, 2))
+        return log_lik / N_EFF_LENSED
 
     # Prior in normalised space (same reasoning as unlensed)
     prior_mean = torch.zeros(3)
     prior_cov  = torch.eye(3)
 
-    # Physical-space scales for un-normalising displayed samples
-    phys_mean = torch.tensor([67.37,   0.02233, 0.1198])
-    phys_std  = torch.tensor([6.0,     0.003,   0.015])
+    # Physical-space scales from the surrogate checkpoint (HMC prior widths)
+    phys_mean = param_mean_tl
+    phys_std  = param_std_tl
 
     snapshot_epochs = [
         0,

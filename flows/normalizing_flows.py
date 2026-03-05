@@ -248,7 +248,8 @@ def run_transport_vi_for_cosmo(
 
 
 def run_sampling_test(model, pi=None, n_samples=300,
-                      u1_range=None, u2_range=None, z_range=None):
+                      u1_range=None, u2_range=None, z_range=None,
+                      fig_name=None, dpi=150):
     """
     Visualise a trained 2D RealNVP flow in both target and latent space.
 
@@ -266,6 +267,8 @@ def run_sampling_test(model, pi=None, n_samples=300,
     n_samples: number of samples to draw.
     u1_range, u2_range: [min, max] for target-space axes (auto-detected if None).
     z_range:  [min, max] (symmetric) for latent-space axes.
+    fig_name: str or None. If given, saves the figure to this path.
+    dpi:      resolution for saved figure.
     """
     u_res, z_res = 200, 200
     if z_range is None:
@@ -301,23 +304,32 @@ def run_sampling_test(model, pi=None, n_samples=300,
         if pi is not None:
             log_pi = pi.log_prob(uu)
 
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+
     plt.figure(figsize=(14, 6))
 
     # --- Left: target space ---
     plt.subplot(1, 2, 1)
+    left_handles = []
     if pi is not None:
         pi_density = torch.exp(log_pi).reshape(u_res, u_res).numpy()
         plt.contourf(ug1.numpy(), ug2.numpy(), pi_density,
                      levels=100, cmap='Oranges', alpha=0.4)
+        left_handles.append(Patch(facecolor='orange', alpha=0.4,
+                                  label='True posterior $\\pi(x)$'))
     plt.contour(ug1.numpy(), ug2.numpy(),
                 torch.exp(log_qx).reshape(u_res, u_res).numpy(),
                 levels=8, colors='black', linewidths=0.8)
-    plt.plot(xs_np[:, 0], xs_np[:, 1], '.b', markersize=4, alpha=0.5,
-             label=r'Samples $x \sim q(x)$')
+    left_handles.append(Line2D([0], [0], color='black', linewidth=0.8,
+                               label='Flow density $q(x)$'))
+    plt.plot(xs_np[:, 0], xs_np[:, 1], '.b', markersize=4, alpha=0.5)
+    left_handles.append(Line2D([0], [0], color='blue', marker='.', linestyle='None',
+                               markersize=6, label=r'Flow samples $x \sim q(x)$'))
     plt.title(r"Target Space: $x = T(z)$")
     plt.xlabel("$u_1$"); plt.ylabel("$u_2$")
     plt.xlim(u1_range); plt.ylim(u2_range)
-    plt.legend()
+    plt.legend(handles=left_handles, fontsize=8)
 
     # --- Right: latent space ---
     plt.subplot(1, 2, 2)
@@ -328,14 +340,23 @@ def run_sampling_test(model, pi=None, n_samples=300,
                  levels=levs_smooth, cmap='Greens', alpha=0.85)
     plt.contour(zg1.numpy(), zg2.numpy(), pz_density,
                 levels=levs_smooth[::25], colors='black', linewidths=0.6, alpha=0.4)
-    plt.plot(zs_np[:, 0], zs_np[:, 1], '.b', markersize=4, alpha=0.5,
-             label=r'Latent $z = T^{-1}(x)$')
+    plt.plot(zs_np[:, 0], zs_np[:, 1], '.b', markersize=4, alpha=0.5)
+    right_handles = [
+        Patch(facecolor='green', alpha=0.85, label='Reference $\\mathcal{N}(0, I)$'),
+        Line2D([0], [0], color='black', linewidth=0.6, alpha=0.4,
+               label='Reference contours'),
+        Line2D([0], [0], color='blue', marker='.', linestyle='None',
+               markersize=6, label=r'Latent samples $z = T^{-1}(x)$'),
+    ]
     plt.title(r"Latent Space: $z = T^{-1}(x)$")
     plt.xlabel("$z_1$"); plt.ylabel("$z_2$")
     plt.xlim(z_range); plt.ylim(z_range)
-    plt.legend()
+    plt.legend(handles=right_handles, fontsize=8)
 
     plt.tight_layout()
+    if fig_name is not None:
+        plt.savefig(fig_name, dpi=dpi, bbox_inches='tight')
+        print(f"  Saved {fig_name}")
     plt.show()
 
     model.train()
