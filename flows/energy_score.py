@@ -22,10 +22,11 @@ def energy_square_distance(sample_p1, sample_p2, abs_fn, sample_size, key = None
     v, key = sample_p2(sample_size, key = key)
     vprime, key = sample_p2(sample_size, key = key)
     term3 = np.mean(abs_fn(v-vprime))
-    print("term1", term1)
-    print("term2", term2)
-    print('term3', term3)
-    return term1 - term2 - term3
+    val = term1 - term2 - term3
+    if val < 0:
+        return 0.0 #the actual energy distance squared is always positive; any negative values are just noisy estimates of values that are small and nonnegative
+    else:
+        return val
 
 
 #example usage
