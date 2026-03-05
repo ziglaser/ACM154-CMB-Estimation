@@ -24,7 +24,7 @@ DATASET = "unlensed"
 # Shared hyper-parameters
 # ─────────────────────────────────────────────────────────────────────────────
 LR         = 1e-3
-NUM_EPOCHS = 1000
+NUM_EPOCHS = 2000
 BATCH_SIZE = 64
 NUM_LAYERS = 8
 HIDDEN_DIM = 256
@@ -39,7 +39,7 @@ SHOW_ANIM  = False
 #   beta > 1   → likelihood dominates (data-driven, appropriate once surrogate is accurate)
 # Start conservative (0→1) and increase BETA_END once results look stable.
 BETA_START = 0.0
-BETA_END   = 1.0
+BETA_END   = 200.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -302,6 +302,14 @@ elif DATASET == "unlensed":
         beta_start=BETA_START,
         beta_end=BETA_END,
     )
+
+    # Save 5000 un-normalised flow samples for energy score evaluation
+    flow.eval()
+    with torch.no_grad():
+        _samples_norm = flow.sample(5000)
+    _samples_phys = (_samples_norm * phys_std_t + phys_mean_t).numpy()
+    np.save("../data/unlensed_flow_samples.npy", _samples_phys)
+    print(f"Saved unlensed_flow_samples.npy  shape={_samples_phys.shape}")
 
 
 # =============================================================================

@@ -17,7 +17,7 @@ fiducial_ombh2 = 0.02233
 
 #load the data
 #data_array = np.zeros((1,10)) #update this with the thinned and reshaped array of shape (3, n)
-f = np.load(f"unlensed_cmb_hmc_chains_seed{seed}_gaussianprior.npz")
+f = np.load(f"../data/unlensed_cmb_hmc_chains_seed{seed}_gaussianprior.npz")
 num_params = 3
 h0_chains = f["h0_chains"]
 ombh2_chains = f["ombh2_chains"]

@@ -51,15 +51,28 @@ FOURIER_K    = np.sqrt(kx_g ** 2 + ky_g ** 2)          # (64, 33)
 FOURIER_K_FL = FOURIER_K.flatten()                       # (2112,)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Prior ranges — match HMC (hmc_flexible_serial_production_version.py line 268)
-#   h0    ~ N(67.37, 40²)   ombh2 ~ N(0.02233, 0.01²)   omch2 ~ N(0.1198, 0.06²)
-# lo/hi are physical clips applied when sampling training data; they cover
-# ±2σ of the HMC prior while staying within physically meaningful bounds.
+# Training range — sized to the *posterior*, not the prior.
+#
+# PARAM_STD defines both the surrogate normalisation and the flow's implicit
+# prior (N(0,I) in normalised space = N(PARAM_MEAN, PARAM_STD²) physically).
+# Using the broad HMC prior std (e.g. 40 for h0) means:
+#   - The flow's prior spans h0 ∈ [−∞, ∞] with σ=40 (mostly outside the posterior)
+#   - The normalised training inputs only span ±0.5σ over the physical range,
+#     so the surrogate is inaccurate where the posterior actually lives.
+#
+# Using posterior-scale stds keeps training data concentrated in the region
+# where the flow will explore, giving much better surrogate accuracy there.
+# The HMC prior is so broad relative to the posterior that a tighter flow prior
+# makes negligible difference to the inferred posterior.
+#
+# Rough posterior widths for a 64×64 CMB patch at 8 arcmin/pixel:
+#   h0    ± ~5–10,   ombh2 ± ~0.002,   omch2 ± ~0.01
+# We use 2× those as STD so training covers ±2σ_posterior comfortably.
 # ─────────────────────────────────────────────────────────────────────────────
 PRIOR = {
-    "h0":    {"mean": 67.37,   "std": 40.0,  "lo": 20.0,   "hi": 120.0},
-    "ombh2": {"mean": 0.02233, "std": 0.01,  "lo": 0.005,  "hi": 0.040},
-    "omch2": {"mean": 0.1198,  "std": 0.06,  "lo": 0.02,   "hi": 0.25},
+    "h0":    {"mean": 67.37,   "std": 10.0,  "lo": 50.0,   "hi": 84.0},
+    "ombh2": {"mean": 0.02233, "std": 0.004, "lo": 0.015,  "hi": 0.030},
+    "omch2": {"mean": 0.1198,  "std": 0.02,  "lo": 0.08,   "hi": 0.16},
 }
 PARAM_MEAN = np.array([PRIOR["h0"]["mean"], PRIOR["ombh2"]["mean"], PRIOR["omch2"]["mean"]])
 PARAM_STD  = np.array([PRIOR["h0"]["std"],  PRIOR["ombh2"]["std"],  PRIOR["omch2"]["std"]])
