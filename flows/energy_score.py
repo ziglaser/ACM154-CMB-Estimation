@@ -2,6 +2,7 @@ import numpy as np
 
 def energy_square_distance(sample_p1, sample_p2, abs_fn, sample_size, key = None):
     '''Empirically computes the energy squared distance.
+    This is more efficient than the other function in this script, but it does require that the samples output np.arrays of shape (sample_size, d) where d is such that p1, p2 are distributions on R^d.
     
     Parameters:
     sample_p1: a function with signature sample_p1(sample_size, key = None) that returns sample_size independent samples from distribution p1, as well as an rng key. The returned sample should be an array where the default '-' does subtraction in the vector space.
@@ -39,6 +40,7 @@ def energy_square_distance(sample_p1, sample_p2, abs_fn, sample_size, key = None
 
 def old_energy_square_distance(sample_p1, sample_p2, abs_fn, sample_size, key = None):
     '''Empirically computes the energy squared distance.
+    Requirements for the interface of samplers are not as strict, but this has a higher variance in the estimate.
     
     Parameters:
     sample_p1: a function with signature sample_p1(sample_size, key = None) that returns sample_size independent samples from distribution p1, as well as an rng key. The returned sample should be an array where the default '-' does subtraction in the vector space.
