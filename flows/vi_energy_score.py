@@ -8,6 +8,13 @@ seed = 0
 #rng = np.random.default_rng(seed)
 rng = np.random.default_rng()
 
+#fiducial values to rescale dimensions before computing energy score
+fiducial_h0 = 67.37
+fiducial_omch2 = 0.1198
+fiducial_ombh2 = 0.02233
+
+
+
 #load the data
 #data_array = np.zeros((1,10)) #update this with the thinned and reshaped array of shape (3, n)
 f = np.load(f"unlensed_cmb_hmc_chains_seed{seed}_gaussianprior.npz")
@@ -40,11 +47,16 @@ gaussian_file.close()
 def sample_p2(sample_size, key = None, mean = mean, cov = cov):
     return (st.multivariate_normal.rvs(mean = mean, cov = cov, size = sample_size, random_state = rng), rng)
 
-#get the r3 norm of a vector
+#get a weighted r3 norm of a vector. Rescale so that the norm is not dominated by a single parameter.
+fiducial = np.array([fiducial_h0, fiducial_ombh2, fiducial_omch2])
 def abs_fn(x):
-    return np.linalg.norm(x, axis=-1)
+    return np.linalg.norm(x/fiducial, axis=-1)
 
-es_old = energy_score.old_energy_square_distance(sample_p1, sample_p2, abs_fn, 1000)
+es_old = energy_score.old_energy_square_distance(sample_p1, sample_p2, abs_fn, 4000)
 es = energy_score.energy_square_distance(sample_p1, sample_p2, abs_fn, 4000)
 print("es squared old", es_old)
 print("es squared", es)
+
+#both of these should be zero in principle. Get a feel for what the noise level is on each:
+print("p1 self energy score", energy_score.energy_square_distance(sample_p1, sample_p1, abs_fn, 4000))
+print("p2 self energy score", energy_score.energy_square_distance(sample_p2, sample_p2, abs_fn, 4000))
