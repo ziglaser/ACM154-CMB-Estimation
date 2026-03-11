@@ -63,20 +63,22 @@ def triangle_plot(samples, param_names, bins1d = 20, bins2d = 10, figsize=None, 
                             zorder=5)
 
             # Labels on edges only
-            if col == 0 and row != 0:
-                ax.set_ylabel(param_names[row])
+            '''if col == 0 and row != 0:
+                ax.set_ylabel(param_names[row])'''
+            if col == 0:
+                ax.set_ylabel(param_names[row], fontweight = 'bold', fontsize = 14)
             else:
                 ax.set_ylabel('')
             if row == n_params - 1:
-                ax.set_xlabel(param_names[col])
+                ax.set_xlabel(param_names[col], fontweight = 'bold', fontsize = 14)
             else:
                 ax.set_xlabel('')
 
             # Remove inner tick labels to reduce clutter
-            if col > 0:
+            '''if col > 0:
                 ax.set_yticklabels([])
             if row < n_params - 1:
-                ax.set_xticklabels([])
+                ax.set_xticklabels([])'''
 
     fig.tight_layout()
     if fig_name is not None:

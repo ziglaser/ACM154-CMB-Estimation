@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 from scipy.stats import multivariate_normal
 
-def triangle_plot(samples, param_names, bins1d=10, bins2d=10, figsize=None, color='steelblue',
+def triangle_plot(samples, param_names, bins1d=20, bins2d=10, figsize=None, color='steelblue',
                   hist2d_cmap='Blues', alpha=0.7, true_values=None, thin_factor=1,
                   fig_name=None, dpi=150, bbox_inches='tight', gaussian=None):
     """
@@ -43,6 +43,7 @@ def triangle_plot(samples, param_names, bins1d=10, bins2d=10, figsize=None, colo
 
     # Thin each parameter independently, then flatten chains
     flat = [samples[:, i, ::thin_factors[i]].ravel() for i in range(n_params)]
+    np.savez("thinned_hmc.npz", h0_thinned = flat[0][:], ombh2_thinned = flat[1][:], omch2_thinned = flat[2][:])
 
     if figsize is None:
         figsize = (2.5 * n_params, 2.5 * n_params)
@@ -99,7 +100,9 @@ def triangle_plot(samples, param_names, bins1d=10, bins2d=10, figsize=None, colo
                 ax.set_ylabel(param_names[row] + "pdf")'''
             
             # Labels on edges only
-            if col == 0 and row != 0:
+            '''if col == 0 and row != 0:
+                ax.set_ylabel(param_names[row])'''
+            if col == 0:
                 ax.set_ylabel(param_names[row])
             else:
                 ax.set_ylabel('')
@@ -107,18 +110,34 @@ def triangle_plot(samples, param_names, bins1d=10, bins2d=10, figsize=None, colo
                 ax.set_xlabel(param_names[col])
             else:
                 ax.set_xlabel('')
-
             # Remove inner tick labels to reduce clutter
             '''if col > 0:
                 ax.set_yticklabels([])
             if row < n_params - 1:
                 ax.set_xticklabels([])'''
 
+    legend_handles = [
+        plt.Rectangle((0, 0), 1, 1, color=color, alpha=alpha),
+    ]
+    legend_labels = ['MCMC']
+
+    if gaussian is not None:
+        legend_handles.append(plt.Line2D([0], [0], color='orange', lw=1.5))
+        legend_labels.append('Variational Inference')
+
+    if true_values is not None:
+        legend_handles.append(plt.Line2D([0], [0], color='red', lw=1.5))
+        legend_labels.append('True values')
+
+    legend_ax = axes[0, -1]
+    legend_ax.set_visible(True)
+    legend_ax.axis('off')
+    legend_ax.legend(legend_handles, legend_labels, loc='center', frameon=True)
+
     fig.tight_layout()
     if fig_name is not None:
         plt.savefig(fig_name, dpi=dpi, bbox_inches=bbox_inches)
     return fig, axes
-
 
 # --- Example usage ---
 if __name__ == '__main__':
