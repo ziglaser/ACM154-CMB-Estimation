@@ -36,6 +36,7 @@ def energy_square_distance(sample_p1, sample_p2, abs_fn, sample_size, key = None
 
     val = term1 - term2 - term3
     return max(val, 0.0)
+    #return val
 
 
 def old_energy_square_distance(sample_p1, sample_p2, abs_fn, sample_size, key = None):
