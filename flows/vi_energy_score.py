@@ -17,7 +17,7 @@ fiducial_ombh2 = 0.02233
 
 #load the data
 #data_array = np.zeros((1,10)) #update this with the thinned and reshaped array of shape (3, n)
-f = np.load(f"../data/unlensed_cmb_hmc_chains_seed{seed}_gaussianprior.npz")
+f = np.load(f"unlensed_cmb_hmc_chains_seed{seed}_gaussianprior.npz")
 num_params = 3
 h0_chains = f["h0_chains"]
 ombh2_chains = f["ombh2_chains"]
@@ -53,10 +53,10 @@ def abs_fn(x):
     return np.linalg.norm(x/fiducial, axis=-1)
 
 es_old = energy_score.old_energy_square_distance(sample_p1, sample_p2, abs_fn, 4000)
-es = energy_score.energy_square_distance(sample_p1, sample_p2, abs_fn, 4000)
+es = energy_score.energy_square_distance(sample_p1, sample_p2, abs_fn, 6000)
 print("es squared old", es_old)
 print("es squared", es)
 
 #both of these should be zero in principle. Get a feel for what the noise level is on each:
-print("p1 self energy score", energy_score.energy_square_distance(sample_p1, sample_p1, abs_fn, 4000))
-print("p2 self energy score", energy_score.energy_square_distance(sample_p2, sample_p2, abs_fn, 4000))
+print("p1 self energy score", energy_score.energy_square_distance(sample_p1, sample_p1, abs_fn, 6000))
+print("p2 self energy score", energy_score.energy_square_distance(sample_p2, sample_p2, abs_fn, 6000))
