@@ -28,7 +28,25 @@ def init_full_params(init_m: jnp.ndarray, init_lparams: None) -> dict:
 def scale_tril_diagonal(params: dict) -> jnp.ndarray:
     return jnp.diag(jnp.exp(params["log_sigma"]))
 
+@jax.jit
 def scale_tril_full(params: dict) -> jnp.ndarray:
+    d  = len(params["mean"])
+    lp = params["l_params"]
+
+    # Build mask for lower triangle (including diagonal)
+    rows, cols = jnp.tril_indices(d)
+
+    # Place all l_params into a flat lower triangle
+    L_flat = jnp.zeros((d, d))
+    L_flat = L_flat.at[rows, cols].set(lp)
+
+    # Exponentiate only the diagonal entries
+    diag_mask = jnp.eye(d, dtype=bool)
+    L = jnp.where(diag_mask, jnp.exp(L_flat), L_flat)
+
+    return L
+
+'''def scale_tril_full(params: dict) -> jnp.ndarray:
     d  = len(params["mean"])
     lp = params["l_params"]
     L  = jnp.zeros((d, d))
@@ -43,7 +61,7 @@ def scale_tril_full(params: dict) -> jnp.ndarray:
             else:
                 L = L.at[i, j].set(lp[idx])
             idx += 1
-    return L
+    return L'''
 
 @partial(jit, static_argnums=(1, 3, 4))  # scale_tril_fn, batch_size, nparams
 def sample_gaussian(params: dict, scale_tril_fn, key: jax.random.PRNGKey,
@@ -150,7 +168,8 @@ def toy_main():
         return observed
 
     observed = load_toy_data()
-    init_m = jnp.zeros(2)
+    #init_m = jnp.zeros(2)
+    init_m = np.array([1.41, 0.16])
     toy_covariance = jnp.array([[1.0, 0.5], [0.5, 2.0]])
 
     def toy_logdensity_fn(means, observed, covariance):
@@ -161,8 +180,9 @@ def toy_main():
         return likelihood + prior
 
     bound_log_prob = lambda x: vmap(lambda means: toy_logdensity_fn(means, observed, toy_covariance))(x)
-    
-    run_vi_jax(init_m, lr = 1e-4, num_epochs=50000, log_prob_fn=bound_log_prob)
+    init_lparams = np.load("toy_init_lparams.npy")
+
+    run_vi_jax(init_m, lr = 1e-4, num_epochs=5000, init_lparams=init_lparams, log_prob_fn=bound_log_prob, savename='toy_Gaussian_VI.npz')
 
 def unlensed_data_main():
     seed = 0
@@ -248,14 +268,7 @@ def unlensed_data_main():
     init_m = [true_h0, true_ombh2, true_omch2]
     init_lparams = np.load("init_lparams.npy")
     savename = f"gaussian_vi_seed{seed}.npz"
-    run_vi_jax(init_m, lr = 1e-5, num_epochs=5000, log_prob_fn=bound_log_prob, init_lparams=init_lparams, savename=savename)
+    run_vi_jax(init_m, lr = 1e-5, num_epochs=1000, log_prob_fn=bound_log_prob, init_lparams=init_lparams, savename=savename)
 
-#toy_main()
-unlensed_data_main()
-
-
-
-
-#current problem: jax gets nans when evaluating grads with respect to parameters.
-#possible solution: add in an initial guess at the covariance. Do this by taking the nuts
-#covariance and then finding its cholesky decomposition
+toy_main()
+#unlensed_data_main()
