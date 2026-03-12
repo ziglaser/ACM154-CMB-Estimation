@@ -13,6 +13,30 @@ h0 = 67.37
 omch2 = 0.1198
 ombh2 = .02233
 '''
+def compute_power_spectrum(map_2d, n_bins=50):
+    """Bin the 2D angular power spectrum of a flat-sky map into n_bins annular ell bins.
+
+    Uses the same pixel_size/npix convention as generate_cosmopower_map.
+    Returns a 1D array of length n_bins containing mean power per bin.
+    """
+    npix = map_2d.shape[0]
+    pixel_size = 8 * np.pi / (60 * 180)          # radians per pixel
+    kx = 2 * np.pi * fft.fftfreq(npix, d=pixel_size)
+    ky = 2 * np.pi * fft.rfftfreq(npix, d=pixel_size)
+    ky_grid, kx_grid = np.meshgrid(ky, kx)
+    k_grid = np.sqrt(kx_grid**2 + ky_grid**2).flatten()
+
+    power = np.abs(fft.rfft2(map_2d, norm="ortho")**2).flatten()
+
+    bin_edges = np.linspace(0, k_grid.max() * 1.001, n_bins + 1)
+    cl = np.zeros(n_bins)
+    for i in range(n_bins):
+        mask = (k_grid >= bin_edges[i]) & (k_grid < bin_edges[i + 1])
+        if mask.sum() > 0:
+            cl[i] = power[mask].mean()
+    return cl
+
+
 def make_upper_mask(npix, self_inverse_indices): 
     '''Makes a mask that is 1 for upper indices (ie, free complex modes) and 0 otherwise. 
     
@@ -82,7 +106,46 @@ def logdensity_fn(h0, ombh2, omch2, fourier_k, unlensed_cmb_fouriers, zero_mode_
     prior_logpdf = 0 #compute the prior pdfs
     return likelihood_logpdf + prior_logpdf
 
-def generate_cosmopower_map(seed, noise_level = 0.08, h0 = 67.37, omch2 = 0.1198, ombh2 = 0.02233, save = True, show = False):
+def generate_cosmopower_theory_spectrum(h0=67.37, omch2=0.1198, ombh2=0.02233,
+                                        noise_level=0.08, n_bins=50):
+    """Return the theoretical binned power spectrum (signal + noise) for given cosmological
+    parameters, in the same units as compute_power_spectrum applied to maps from
+    generate_cosmopower_map. Does not generate a random realization — deterministic and fast.
+    """
+    npix = 64
+    pixel_size = 8 * np.pi / (60 * 180)          # radians per pixel
+    kx = 2 * np.pi * fft.fftfreq(npix, d=pixel_size)
+    ky = 2 * np.pi * fft.rfftfreq(npix, d=pixel_size)
+    ky_grid, kx_grid = np.meshgrid(ky, kx)
+    fourier_k = np.sqrt(kx_grid**2 + ky_grid**2)  # (npix, npix//2+1)
+
+    cosmo_params = jnp.array([ombh2, omch2, h0/100, .0540, .9652, np.log(10*2.08666022)])
+    emulator = CPJ(probe='cmb_tt')
+    spectrum = emulator.predict(cosmo_params) * 7428350250000.0
+    emulator_ell = emulator.modes
+
+    # Signal variance per Fourier mode, interpolated from emulator spectrum
+    signal_var = interp1d(fourier_k.flatten(), emulator_ell, spectrum, method="cubic")
+    signal_var = np.reshape(np.array(signal_var), (npix, npix//2+1))
+    signal_var = np.maximum(signal_var, 0)
+    signal_var[0, 0] = 0
+
+    # Total power per mode (signal + noise), then account for map/pixel_size normalisation
+    total_var = (signal_var + noise_level**2) / pixel_size**2
+
+    # Bin into annular ell bins — same binning as compute_power_spectrum
+    k_flat = fourier_k.flatten()
+    var_flat = total_var.flatten()
+    bin_edges = np.linspace(0, k_flat.max() * 1.001, n_bins + 1)
+    cl = np.zeros(n_bins)
+    for i in range(n_bins):
+        mask = (k_flat >= bin_edges[i]) & (k_flat < bin_edges[i + 1])
+        if mask.sum() > 0:
+            cl[i] = var_flat[mask].mean()
+    return cl
+
+
+def generate_cosmopower_map(seed, noise_level = 0.08, h0 = 67.37, omch2 = 0.1198, ombh2 = 0.02233, save = False, show = False):
     '''Generates an unlensed CMB map given cosmological parameters of interest. Note that the generated map will be a
     Gaussian random field, but the power spectrum of this field will correspond to the LENSED temperature auto spectrum.
     For our project, this doesn't matter. It also saves the map in the file f"hmc_unlensed_map_seed{seed}.npy" if save = True.
@@ -132,7 +195,7 @@ def generate_cosmopower_map(seed, noise_level = 0.08, h0 = 67.37, omch2 = 0.1198
     #convert the cosmpower emulator spectrum to variances of fourier modes
     sigmas = interp1d(fourier_k.flatten(), emulator_ell, spectrum, method="cubic")
     sigmas = np.reshape(sigmas, (64, 33))
-    sigmas = np.sqrt(sigmas)
+    sigmas = np.sqrt(np.maximum(sigmas, 0))
     sigmas[0,0] = 0
     
     #generate some white noise
@@ -188,4 +251,8 @@ def generate_cosmopower_map(seed, noise_level = 0.08, h0 = 67.37, omch2 = 0.1198
 
 
 #example function call to generate a map, save it, and plot it.
+<<<<<<<< HEAD:data/generate_cosmopower_unlensed_maps.py
 generate_cosmopower_map(0, 0.08, 67.37,0.1198, 0.02233, True, True)
+========
+#generate_cosmopower_map(1000, 0.08, 67.37,0.1198, 0.02233, True, True)
+>>>>>>>> origin/zach:src/generate_cosmopower_unlensed_maps.py
