@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -18,7 +19,7 @@ from normalizing_flows import (
 # ─────────────────────────────────────────────────────────────────────────────
 # Choose dataset: "toy" | "unlensed" | "lensed"
 # ─────────────────────────────────────────────────────────────────────────────
-DATASET = "unlensed"
+DATASET = "toy"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared hyper-parameters
@@ -150,6 +151,7 @@ if DATASET == "toy":
     pi  = CosmoPosterior(prior_mean, prior_cov, log_likelihood_fn_toy)
     pi.dim = 2  # already set by CosmoPosterior.__init__
 
+    _t0 = time.time()
     flow = run_transport_vi_for_cosmo(
         pi,
         lr=LR,
@@ -159,6 +161,48 @@ if DATASET == "toy":
         hidden_dim=HIDDEN_DIM,
         show_anim=SHOW_ANIM,
     )
+    _train_time = time.time() - _t0
+    print(f"\nToy training time: {_train_time:.1f}s  ({_train_time/60:.2f} min)")
+
+    # ── Analytical posterior (Gaussian conjugate) ────────────────────────────
+    # Likelihood: x | θ ~ N(θ, Σ_data),  Prior: θ ~ N(0, I)
+    # → Σ_post = inv(inv(Σ_data) + I),   μ_post = Σ_post @ inv(Σ_data) @ x
+    _data_cov_np   = np.array([[1.0, 0.5], [0.5, 2.0]])
+    _data_cov_inv  = np.linalg.inv(_data_cov_np)
+    _post_cov_true = np.linalg.inv(_data_cov_inv + np.eye(2))
+    _obs_np        = observed.numpy()
+    _post_mean_true = _post_cov_true @ _data_cov_inv @ _obs_np   # (2,)
+
+    # Flow samples
+    flow.eval()
+    with torch.no_grad():
+        _flow_samples = flow.sample(2000).numpy()   # (2000, 2)
+    _flow_mean = _flow_samples.mean(axis=0)
+
+    # MSE of posterior mean vs analytical posterior mean
+    _mse_toy = np.mean((_flow_mean - _post_mean_true) ** 2)
+    print(f"\n── Toy summary ───────────────────────────────────")
+    print(f"  Analytical posterior mean : {_post_mean_true}")
+    print(f"  Flow posterior mean       : {_flow_mean}")
+    print(f"  MSE (mean vs true mean)   : {_mse_toy:.6f}")
+
+    # Energy score: flow posterior vs analytical posterior
+    from energy_score import energy_square_distance as _es
+    _rng = np.random.default_rng(0)
+
+    def _sample_true(n, key=None):
+        s = _rng.multivariate_normal(_post_mean_true, _post_cov_true, size=n)
+        return s, None
+
+    flow.eval()  # ensure eval mode for sampling
+    def _sample_flow_fresh(n, key=None):
+        with torch.no_grad():
+            s = flow.sample(n).numpy()
+        return s, None
+
+    _es_val = _es(_sample_true, _sample_flow_fresh, lambda d: np.sqrt((d ** 2).sum(-1)), 1000)
+    print(f"  Squared energy score (Flow || True posterior): {_es_val:.6f}")
+    print(f"  Training time             : {_train_time:.1f}s")
 
     # Visualise: target space vs latent space, true posterior contour in orange
     run_sampling_test(
@@ -289,6 +333,7 @@ elif DATASET == "unlensed":
 
     pi = CosmoPosterior(prior_mean, prior_cov, log_likelihood_fn_unlensed)
 
+    _t0 = time.time()
     flow = run_transport_vi_for_cosmo(
         pi,
         lr=LR,
@@ -302,14 +347,29 @@ elif DATASET == "unlensed":
         beta_start=BETA_START,
         beta_end=BETA_END,
     )
+    _train_time = time.time() - _t0
+    print(f"\nUnlensed training time: {_train_time:.1f}s  ({_train_time/60:.2f} min)")
 
     # Save 5000 un-normalised flow samples for energy score evaluation
     flow.eval()
     with torch.no_grad():
         _samples_norm = flow.sample(5000)
-    _samples_phys = (_samples_norm * phys_std_t + phys_mean_t).numpy()
-    np.save("../data/unlensed_flow_samples.npy", _samples_phys)
+    _samples_phys = (_samples_norm * phys_std_t + phys_mean_t).numpy()  # (5000, 3)
+    np.save("unlensed_flow_samples.npy", _samples_phys)
     print(f"Saved unlensed_flow_samples.npy  shape={_samples_phys.shape}")
+
+    # MSE of posterior mean vs true values
+    _true = np.array(TRUE_VALUES)                        # [h0, ombh2, omch2]
+    _fiducial = np.array([67.37, 0.02233, 0.1198])
+    _post_mean = _samples_phys.mean(axis=0)              # (3,)
+    _mse_raw   = np.mean((_post_mean - _true) ** 2)
+    _mse_scaled = np.mean(((_post_mean - _true) / _fiducial) ** 2)
+    print(f"\n── Unlensed summary ──────────────────────────────")
+    print(f"  True values  : h0={_true[0]:.4f}  ombh2={_true[1]:.5f}  omch2={_true[2]:.4f}")
+    print(f"  Posterior mean: h0={_post_mean[0]:.4f}  ombh2={_post_mean[1]:.5f}  omch2={_post_mean[2]:.4f}")
+    print(f"  MSE (raw)    : {_mse_raw:.6f}")
+    print(f"  MSE (scaled) : {_mse_scaled:.6f}  (normalised by fiducial²)")
+    print(f"  Training time: {_train_time:.1f}s")
 
 
 # =============================================================================
@@ -411,6 +471,7 @@ elif DATASET == "lensed":
 
     pi = CosmoPosterior(prior_mean, prior_cov, log_likelihood_fn_lensed)
 
+    _t0 = time.time()
     flow = run_transport_vi_for_cosmo(
         pi,
         lr=LR,
@@ -424,6 +485,25 @@ elif DATASET == "lensed":
         beta_start=BETA_START,
         beta_end=BETA_END,
     )
+    _train_time = time.time() - _t0
+    print(f"\nLensed training time: {_train_time:.1f}s  ({_train_time/60:.2f} min)")
+
+    # MSE of posterior mean vs true values
+    flow.eval()
+    with torch.no_grad():
+        _samples_norm = flow.sample(5000)
+    _samples_phys = (_samples_norm * phys_std + phys_mean).numpy()
+    _true     = np.array(TRUE_VALUES)
+    _fiducial = np.array([67.37, 0.02233, 0.1198])
+    _post_mean   = _samples_phys.mean(axis=0)
+    _mse_raw     = np.mean((_post_mean - _true) ** 2)
+    _mse_scaled  = np.mean(((_post_mean - _true) / _fiducial) ** 2)
+    print(f"\n── Lensed summary ────────────────────────────────")
+    print(f"  True values  : h0={_true[0]:.4f}  ombh2={_true[1]:.5f}  omch2={_true[2]:.4f}")
+    print(f"  Posterior mean: h0={_post_mean[0]:.4f}  ombh2={_post_mean[1]:.5f}  omch2={_post_mean[2]:.4f}")
+    print(f"  MSE (raw)    : {_mse_raw:.6f}")
+    print(f"  MSE (scaled) : {_mse_scaled:.6f}  (normalised by fiducial²)")
+    print(f"  Training time: {_train_time:.1f}s")
 
 
 else:
